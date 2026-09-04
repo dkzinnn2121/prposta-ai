@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proposta AI — Gerador de Propostas</title>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
+        body { background-color: #0f172a; color: #f8fafc; padding: 2rem; max-width: 1000px; margin: 0 auto; }
+        h1 { font-size: 1.8rem; margin-bottom: 0.5rem; color: #38bdf8; }
+        p.subtitle { color: #94a3b8; margin-bottom: 2rem; }
+        
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; }
+        .card h2 { font-size: 1.2rem; margin-bottom: 1rem; color: #f1f5f9; }
+        
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.4rem; font-weight: 600; }
+        input, textarea { width: 100%; padding: 0.75rem; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #fff; font-size: 0.95rem; }
+        input:focus, textarea:focus { outline: none; border-color: #38bdf8; }
+        textarea { height: 90px; resize: vertical; }
+        
+        button.btn-submit { width: 100%; background: #0284c7; color: white; border: none; padding: 0.85rem; font-size: 1rem; font-weight: bold; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
+        button.btn-submit:hover { background: #0369a1; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { text-align: left; padding: 0.75rem; border-bottom: 1px solid #334155; font-size: 0.9rem; }
+        th { color: #94a3b8; font-weight: 600; background: #0f172a; }
+        
+        .btn-pdf { background: #10b981; color: white; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; text-decoration: none; font-size: 0.85rem; font-weight: bold; }
+        .btn-pdf:hover { background: #059669; }
+        .btn-del { background: #ef4444; color: white; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: bold; margin-left: 0.3rem; }
+        .btn-del:hover { background: #dc2626; }
+    </style>
+</head>
+<body>
+
+    <h1>Proposta AI</h1>
+    <p class="subtitle">Gere propostas comerciais profissionais com Inteligência Artificial e exposte em PDF.</p>
+
+    <!-- Formulário -->
+    <div class="card">
+        <h2>Criar Nova Proposta</h2>
+        <form id="propostaForm">
+            <div class="form-group">
+                <label>Nome do Cliente</label>
+                <input type="text" id="cliente" placeholder="Ex: Mercado Central Ltd" required>
+            </div>
+            <div class="form-group">
+                <label>Serviço Oferecido</label>
+                <input type="text" id="servico" placeholder="Ex: Sistema de Gestão de Estoque" required>
+            </div>
+            <div class="form-group">
+                <label>Orçamento Estimado (R$)</label>
+                <input type="number" id="orcamento" step="0.01" placeholder="Ex: 5000.00" required>
+            </div>
+            <div class="form-group">
+                <label>Detalhes e Escopo</label>
+                <textarea id="detalhes" placeholder="Ex: Desenvolvimento de painel para controle de entradas, saídas e relatórios em PDF." required></textarea>
+            </div>
+            <button type="submit" class="btn-submit" id="btnGerar">Gerar Proposta com IA</button>
+        </form>
+    </div>
+
+    <!-- Tabela de Propostas Cadastradas -->
+    <div class="card">
+        <h2>Propostas Geradas</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Cliente</th>
+                    <th>Serviço</th>
+                    <th>Orçamento</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody id="tabelaPropostas">
+                <tr><td colspan="5" style="text-align: center; color: #64748b;">Carregando propostas...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const API_URL = "http://127.0.0.1:8000";
+
+        // Carregar propostas ao abrir a página
+        async function carregarPropostas() {
+            const res = await fetch(`${API_URL}/propostas`);
+            const propostas = await res.json();
+            const tbody = document.getElementById("tabelaPropostas");
+            
+            if (propostas.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #64748b;">Nenhuma proposta cadastrada ainda.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = propostas.map(p => `
+                <tr>
+                    <td>#${p.id}</td>
+                    <td><strong>${p.cliente}</strong></td>
+                    <td>${p.servico}</td>
+                    <td>R$ ${p.orcamento.toFixed(2)}</td>
+                    <td>
+                        <a href="${API_URL}/proposta/${p.id}/pdf" target="_blank" class="btn-pdf">Baixar PDF</a>
+                        <button onclick="deletarProposta(${p.id})" class="btn-del">Excluir</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Enviar formulário para criar proposta
+        document.getElementById("propostaForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById("btnGerar");
+            btn.disabled = true;
+            btn.innerText = "Gerando proposta via IA... aguarde!";
+
+            const dados = {
+                cliente: document.getElementById("cliente").value,
+                servico: document.getElementById("servico").value,
+                orcamento: parseFloat(document.getElementById("orcamento").value),
+                detalhes: document.getElementById("detalhes").value
+            };
+
+            try {
+                const res = await fetch(`${API_URL}/proposta`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(dados)
+                });
+                
+                if (res.ok) {
+                    document.getElementById("propostaForm").reset();
+                    await carregarPropostas();
+                } else {
+                    alert("Erro ao gerar proposta.");
+                }
+            } catch (err) {
+                alert("Erro de conexão com o servidor.");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Gerar Proposta com IA";
+            }
+        });
+
+        // Deletar proposta
+        async function deletarProposta(id) {
+            if (confirm(`Deseja realmente apagar a proposta #${id}?`)) {
+                await fetch(`${API_URL}/proposta/${id}`, { method: "DELETE" });
+                await carregarPropostas();
+            }
+        }
+
+        carregarPropostas();
+    </script>
+</body>
+</html>

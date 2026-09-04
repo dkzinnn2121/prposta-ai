@@ -2,7 +2,7 @@ import os
 import re
 from typing import List
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel
 from google import genai
 from dotenv import load_dotenv
@@ -73,46 +73,59 @@ class PDFProposta(FPDF):
         self.set_text_color(148, 163, 184)
         self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
 
+def sanitizar_texto(texto: str) -> str:
+    """ Remove emojis, caracteres não compatíveis e limpa sintaxe LaTeX/Math """
+    # Remove cifrões soltos de expressões como $24/7$ -> 24/7
+    texto = re.sub(r'\$([^$]+)\$', r'\1', texto)
+    texto = texto.replace('$', '')
+    
+    # Filtra mantendo apenas caracteres suportados pela codificação latin-1 (remove emojis)
+    texto_limpo = []
+    for char in texto:
+        try:
+            char.encode('latin-1')
+            texto_limpo.append(char)
+        except UnicodeEncodeError:
+            continue
+    return "".join(texto_limpo)
+
 def processar_markdown_para_pdf(pdf: FPDF, texto: str):
     linhas = texto.split('\n')
     for linha in linhas:
-        linha_limpa = linha.strip()
+        linha_limpa = sanitizar_texto(linha.strip())
         if not linha_limpa:
             pdf.ln(2)
             continue
 
-        # Ignorar cercas de código Markdown (```)
         if linha_limpa.startswith('```'):
             continue
 
-        # Garante o resete do cursor na margem esquerda
         pdf.set_x(pdf.l_margin)
 
-        # Processar Títulos (#, ##, ###)
+        # Títulos (#)
         if linha_limpa.startswith('#'):
             pdf.ln(2)
             pdf.set_font('Helvetica', 'B', 11)
             pdf.set_text_color(15, 23, 42)
             titulo = re.sub(r'#+\s*', '', linha_limpa).replace('**', '').replace('`', '')
-            texto_encode = titulo.encode('latin-1', 'replace').decode('latin-1')
-            pdf.multi_cell(0, 6, texto_encode)
+            pdf.multi_cell(0, 6, titulo.encode('latin-1', 'replace').decode('latin-1'))
             pdf.set_font('Helvetica', '', 10)
             pdf.set_text_color(51, 65, 85)
             pdf.ln(1)
-        # Processar Listas (* ou - ou +)
+        # Listas (* - +)
         elif linha_limpa.startswith('* ') or linha_limpa.startswith('- ') or linha_limpa.startswith('+ '):
             item = linha_limpa[2:].replace('**', '').replace('`', '')
-            texto_encode = f"- {item}".encode('latin-1', 'replace').decode('latin-1')
-            pdf.multi_cell(0, 6, texto_encode)
-        # Processar Parágrafo Comum
+            texto_formatado = f"- {item}"
+            pdf.multi_cell(0, 6, texto_formatado.encode('latin-1', 'replace').decode('latin-1'))
+        # Parágrafos comuns
         else:
-            texto_limpo = linha_limpa.replace('**', '').replace('`', '')
-            texto_encode = texto_limpo.encode('latin-1', 'replace').decode('latin-1')
-            pdf.multi_cell(0, 6, texto_encode)
+            texto_formatado = linha_limpa.replace('**', '').replace('`', '')
+            pdf.multi_cell(0, 6, texto_formatado.encode('latin-1', 'replace').decode('latin-1'))
 
+# ROTA PRINCIPAL: Abre o site
 @app.get("/")
-def inicio():
-    return {"mensagem": "Proposta AI esta funcionando com PDF Formatado!"}
+def abrir_site():
+    return FileResponse("app/static/index.html")
 
 # ROTA 1: Criar proposta com IA
 @app.post("/proposta", response_model=PropostaResponse)
@@ -124,20 +137,25 @@ def criar_proposta(dados: PropostaRequest, db: Session = Depends(get_db)):
         )
     
     prompt = f"""
-    Atue como um especialista em vendas e negociações comerciais.
-    Crie uma proposta comercial formal, persuasiva e profissional para o cliente '{dados.cliente}'.
+    Atue como um diretor jurídico e comercial sênior.
+    Elabore uma proposta comercial estritamente formal, executiva e contratual para o cliente '{dados.cliente}'.
+
+    REGRAS RÍGIDAS DE FORMATAÇÃO E TOM:
+    - NUNCA utilize emojis, ícones ou qualquer caractere gráfico em nenhuma hipótese.
+    - NUNCA utilize cifrões para isolar termos ou horários (exemplo incorreto: $24/7$; correto: 24 horas por dia).
+    - Utilize tom formal, corporativo, direto e sóbrio.
 
     Dados do Projeto:
     - Serviço: {dados.servico}
     - Orçamento estimado: R$ {dados.orcamento:.2f}
     - Detalhes e escopo: {dados.detalhes}
 
-    Estrutura desejada na proposta:
-    1. Introdução / Apresentação
-    2. Escopo dos Serviços
-    3. Cronograma sugerido
-    4. Investimento e Condições de Pagamento
-    5. Próximos Passos
+    Estrutura da Proposta:
+    1. Apresentação Executiva
+    2. Escopo Técnico dos Serviços
+    3. Cronograma de Execução
+    4. Condições Financeiras e Investimento
+    5. Termos de Aceite e Próximos Passos
     """
 
     try:
@@ -185,7 +203,6 @@ def baixar_proposta_pdf(proposta_id: int, db: Session = Depends(get_db)):
     pdf = PDFProposta()
     pdf.add_page()
     
-    # Cabeçalho do Cliente
     pdf.set_font('Helvetica', 'B', 11)
     pdf.set_text_color(15, 23, 42)
     pdf.cell(0, 6, f"Cliente: {proposta.cliente}", ln=True)
@@ -193,7 +210,6 @@ def baixar_proposta_pdf(proposta_id: int, db: Session = Depends(get_db)):
     pdf.cell(0, 6, f"Orcamento: R$ {proposta.orcamento:.2f}", ln=True)
     pdf.ln(4)
     
-    # Corpo do texto com parser de Markdown
     pdf.set_font('Helvetica', '', 10)
     pdf.set_text_color(51, 65, 85)
     processar_markdown_para_pdf(pdf, proposta.proposta_texto)
