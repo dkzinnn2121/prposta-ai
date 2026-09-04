@@ -1,19 +1,25 @@
 from fastapi import FastAPI
+from pydantic import BaseModel
 
 app = FastAPI()
+
+# Define a estrutura de dados esperada na requisição
+class PropostaRequest(BaseModel):
+    cliente: str
+    servico: str
+    orcamento: float
+    detalhes: str
 
 @app.get("/")
 def inicio():
     return {"mensagem": "Proposta AI esta funcionando!"}
 
-@app.get("/status")
-def status():
-    return {"status": "Online", "versao": "0.1.0"}
-
-@app.get("/proposta/exemplo")
-def exemplo_proposta():
+@app.post("/proposta")
+def criar_proposta(dados: PropostaRequest):
+    # Por enquanto, simulamos o processamento retornando a confirmação dos dados
     return {
-        "cliente": "Empresa ABC",
-        "valor": 5000.00,
-        "descricao": "Desenvolvimento de sistema Web com IA"
+        "status": "Proposta recebida com sucesso!",
+        "cliente": dados.cliente,
+        "resumo": f"Serviço de '{dados.servico}' orçado em R$ {dados.orcamento:.2f}",
+        "proposta_gerada": f"Proposta comercial para {dados.cliente}: Prestação de serviços em {dados.servico}. Detalhes: {dados.detalhes}"
     }
