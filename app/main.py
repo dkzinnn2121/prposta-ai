@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import Response
@@ -58,7 +59,7 @@ class PropostaResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# Helper para formatação de PDF
+# Helper para formatação do PDF
 class PDFProposta(FPDF):
     def header(self):
         self.set_font('Helvetica', 'B', 14)
@@ -72,11 +73,48 @@ class PDFProposta(FPDF):
         self.set_text_color(148, 163, 184)
         self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
 
+def processar_markdown_para_pdf(pdf: FPDF, texto: str):
+    linhas = texto.split('\n')
+    for linha in linhas:
+        linha_limpa = linha.strip()
+        if not linha_limpa:
+            pdf.ln(2)
+            continue
+
+        # Ignorar cercas de código Markdown (```)
+        if linha_limpa.startswith('```'):
+            continue
+
+        # Garante o resete do cursor na margem esquerda
+        pdf.set_x(pdf.l_margin)
+
+        # Processar Títulos (#, ##, ###)
+        if linha_limpa.startswith('#'):
+            pdf.ln(2)
+            pdf.set_font('Helvetica', 'B', 11)
+            pdf.set_text_color(15, 23, 42)
+            titulo = re.sub(r'#+\s*', '', linha_limpa).replace('**', '').replace('`', '')
+            texto_encode = titulo.encode('latin-1', 'replace').decode('latin-1')
+            pdf.multi_cell(0, 6, texto_encode)
+            pdf.set_font('Helvetica', '', 10)
+            pdf.set_text_color(51, 65, 85)
+            pdf.ln(1)
+        # Processar Listas (* ou - ou +)
+        elif linha_limpa.startswith('* ') or linha_limpa.startswith('- ') or linha_limpa.startswith('+ '):
+            item = linha_limpa[2:].replace('**', '').replace('`', '')
+            texto_encode = f"- {item}".encode('latin-1', 'replace').decode('latin-1')
+            pdf.multi_cell(0, 6, texto_encode)
+        # Processar Parágrafo Comum
+        else:
+            texto_limpo = linha_limpa.replace('**', '').replace('`', '')
+            texto_encode = texto_limpo.encode('latin-1', 'replace').decode('latin-1')
+            pdf.multi_cell(0, 6, texto_encode)
+
 @app.get("/")
 def inicio():
-    return {"mensagem": "Proposta AI esta funcionando com Banco de Dados e Exportacao PDF!"}
+    return {"mensagem": "Proposta AI esta funcionando com PDF Formatado!"}
 
-# ROTA 1: Criar proposta com IA e salvar no Banco
+# ROTA 1: Criar proposta com IA
 @app.post("/proposta", response_model=PropostaResponse)
 def criar_proposta(dados: PropostaRequest, db: Session = Depends(get_db)):
     if not client:
@@ -129,7 +167,7 @@ def criar_proposta(dados: PropostaRequest, db: Session = Depends(get_db)):
 def listar_propostas(db: Session = Depends(get_db)):
     return db.query(PropostaDB).all()
 
-# ROTA 3: Buscar uma proposta específica por ID
+# ROTA 3: Buscar uma proposta por ID
 @app.get("/proposta/{proposta_id}", response_model=PropostaResponse)
 def obter_proposta(proposta_id: int, db: Session = Depends(get_db)):
     proposta = db.query(PropostaDB).filter(PropostaDB.id == proposta_id).first()
@@ -137,7 +175,7 @@ def obter_proposta(proposta_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Proposta não encontrada")
     return proposta
 
-# ROTA 4: Exportar Proposta em arquivo PDF para Download
+# ROTA 4: Exportar PDF Formatado
 @app.get("/proposta/{proposta_id}/pdf")
 def baixar_proposta_pdf(proposta_id: int, db: Session = Depends(get_db)):
     proposta = db.query(PropostaDB).filter(PropostaDB.id == proposta_id).first()
@@ -146,16 +184,19 @@ def baixar_proposta_pdf(proposta_id: int, db: Session = Depends(get_db)):
 
     pdf = PDFProposta()
     pdf.add_page()
-    pdf.set_font('Helvetica', 'B', 11)
-    pdf.cell(0, 7, f"Cliente: {proposta.cliente}", ln=True)
-    pdf.cell(0, 7, f"Servico: {proposta.servico}", ln=True)
-    pdf.cell(0, 7, f"Orcamento: R$ {proposta.orcamento:.2f}", ln=True)
-    pdf.ln(5)
     
+    # Cabeçalho do Cliente
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 6, f"Cliente: {proposta.cliente}", ln=True)
+    pdf.cell(0, 6, f"Servico: {proposta.servico}", ln=True)
+    pdf.cell(0, 6, f"Orcamento: R$ {proposta.orcamento:.2f}", ln=True)
+    pdf.ln(4)
+    
+    # Corpo do texto com parser de Markdown
     pdf.set_font('Helvetica', '', 10)
-    # Limpa caracteres especiais não suportados no padrão do FPDF
-    texto_limpo = proposta.proposta_texto.encode('latin-1', 'replace').decode('latin-1')
-    pdf.multi_cell(0, 6, texto_limpo)
+    pdf.set_text_color(51, 65, 85)
+    processar_markdown_para_pdf(pdf, proposta.proposta_texto)
 
     pdf_bytes = bytes(pdf.output())
 
@@ -164,7 +205,7 @@ def baixar_proposta_pdf(proposta_id: int, db: Session = Depends(get_db)):
     }
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
-# ROTA 5: Deletar uma proposta por ID
+# ROTA 5: Deletar uma proposta
 @app.delete("/proposta/{proposta_id}")
 def deletar_proposta(proposta_id: int, db: Session = Depends(get_db)):
     proposta = db.query(PropostaDB).filter(PropostaDB.id == proposta_id).first()
