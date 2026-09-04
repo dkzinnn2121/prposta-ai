@@ -1,9 +1,11 @@
 import os
 from typing import List
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import Response
 from pydantic import BaseModel
 from google import genai
 from dotenv import load_dotenv
+from fpdf import FPDF
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
@@ -56,9 +58,23 @@ class PropostaResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# Helper para formatação de PDF
+class PDFProposta(FPDF):
+    def header(self):
+        self.set_font('Helvetica', 'B', 14)
+        self.set_text_color(15, 23, 42)
+        self.cell(0, 10, 'PROPOSTA COMERCIAL - PROPOSTA AI', ln=True, align='C')
+        self.ln(2)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Helvetica', 'I', 8)
+        self.set_text_color(148, 163, 184)
+        self.cell(0, 10, f'Pagina {self.page_no()}', align='C')
+
 @app.get("/")
 def inicio():
-    return {"mensagem": "Proposta AI esta funcionando com Banco de Dados!"}
+    return {"mensagem": "Proposta AI esta funcionando com Banco de Dados e Exportacao PDF!"}
 
 # ROTA 1: Criar proposta com IA e salvar no Banco
 @app.post("/proposta", response_model=PropostaResponse)
@@ -121,7 +137,34 @@ def obter_proposta(proposta_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Proposta não encontrada")
     return proposta
 
-# ROTA 4: Deletar uma proposta por ID
+# ROTA 4: Exportar Proposta em arquivo PDF para Download
+@app.get("/proposta/{proposta_id}/pdf")
+def baixar_proposta_pdf(proposta_id: int, db: Session = Depends(get_db)):
+    proposta = db.query(PropostaDB).filter(PropostaDB.id == proposta_id).first()
+    if not proposta:
+        raise HTTPException(status_code=404, detail="Proposta não encontrada")
+
+    pdf = PDFProposta()
+    pdf.add_page()
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.cell(0, 7, f"Cliente: {proposta.cliente}", ln=True)
+    pdf.cell(0, 7, f"Servico: {proposta.servico}", ln=True)
+    pdf.cell(0, 7, f"Orcamento: R$ {proposta.orcamento:.2f}", ln=True)
+    pdf.ln(5)
+    
+    pdf.set_font('Helvetica', '', 10)
+    # Limpa caracteres especiais não suportados no padrão do FPDF
+    texto_limpo = proposta.proposta_texto.encode('latin-1', 'replace').decode('latin-1')
+    pdf.multi_cell(0, 6, texto_limpo)
+
+    pdf_bytes = bytes(pdf.output())
+
+    headers = {
+        'Content-Disposition': f'attachment; filename="proposta_{proposta_id}.pdf"'
+    }
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+# ROTA 5: Deletar uma proposta por ID
 @app.delete("/proposta/{proposta_id}")
 def deletar_proposta(proposta_id: int, db: Session = Depends(get_db)):
     proposta = db.query(PropostaDB).filter(PropostaDB.id == proposta_id).first()
