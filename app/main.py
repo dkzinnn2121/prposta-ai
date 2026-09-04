@@ -5,17 +5,15 @@ from pydantic import BaseModel
 from google import genai
 from dotenv import load_dotenv
 
-# Imports do SQLAlchemy para o Banco de Dados
 from sqlalchemy import create_engine, Column, Integer, String, Float, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
-# 1. Configuração do Banco de Dados SQLite
+# Configuração do SQLite
 DATABASE_URL = "sqlite:///./propostas.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Modelo da tabela no Banco de Dados
 class PropostaDB(Base):
     __tablename__ = "propostas"
 
@@ -26,17 +24,14 @@ class PropostaDB(Base):
     detalhes = Column(String)
     proposta_texto = Column(Text)
 
-# Cria as tabelas no arquivo SQLite automaticamente ao iniciar
 Base.metadata.create_all(bind=engine)
 
-# 3. Carrega a chave do Gemini
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key) if api_key else None
 
 app = FastAPI()
 
-# Função auxiliar para gerenciar a conexão com o banco
 def get_db():
     db = SessionLocal()
     try:
@@ -44,7 +39,6 @@ def get_db():
     finally:
         db.close()
 
-# Schemas Pydantic
 class PropostaRequest(BaseModel):
     cliente: str
     servico: str
@@ -66,7 +60,7 @@ class PropostaResponse(BaseModel):
 def inicio():
     return {"mensagem": "Proposta AI esta funcionando com Banco de Dados!"}
 
-# ROTA 1: Criar proposta com IA e SALVAR no Banco de Dados
+# ROTA 1: Criar proposta com IA e salvar no Banco
 @app.post("/proposta", response_model=PropostaResponse)
 def criar_proposta(dados: PropostaRequest, db: Session = Depends(get_db)):
     if not client:
@@ -101,7 +95,6 @@ def criar_proposta(dados: PropostaRequest, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao chamar Gemini API: {str(e)}")
 
-    # Salva no Banco de Dados
     nova_proposta = PropostaDB(
         cliente=dados.cliente,
         servico=dados.servico,
@@ -115,8 +108,25 @@ def criar_proposta(dados: PropostaRequest, db: Session = Depends(get_db)):
 
     return nova_proposta
 
-# ROTA 2: Listar todas as propostas salvas no Banco
+# ROTA 2: Listar todas as propostas
 @app.get("/propostas", response_model=List[PropostaResponse])
 def listar_propostas(db: Session = Depends(get_db)):
-    propostas = db.query(PropostaDB).all()
-    return propostas
+    return db.query(PropostaDB).all()
+
+# ROTA 3: Buscar uma proposta específica por ID
+@app.get("/proposta/{proposta_id}", response_model=PropostaResponse)
+def obter_proposta(proposta_id: int, db: Session = Depends(get_db)):
+    proposta = db.query(PropostaDB).filter(PropostaDB.id == proposta_id).first()
+    if not proposta:
+        raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    return proposta
+
+# ROTA 4: Deletar uma proposta por ID
+@app.delete("/proposta/{proposta_id}")
+def deletar_proposta(proposta_id: int, db: Session = Depends(get_db)):
+    proposta = db.query(PropostaDB).filter(PropostaDB.id == proposta_id).first()
+    if not proposta:
+        raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    db.delete(proposta)
+    db.commit()
+    return {"mensagem": f"Proposta {proposta_id} removida com sucesso!"}
